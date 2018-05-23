@@ -1,301 +1,285 @@
-code segment
-	assume cs:code, ds:data, ss:Tstack
-start_mem:
-	PSP dw 0
-	KEEP_CS dw 0
-	KEEP_IP dw 0
-	Counter dw 0
-	Message db 'Interrupt was called        times$'
+CODE SEGMENT
+ ASSUME CS:CODE, DS:DATA, ES:DATA, SS:ASTACK
 
-push_reg macro
-	push 	ax
-	push 	bx
-	push 	cx
-	push 	dx
-endm
-
-pop_reg macro
-	pop 	dx
-	pop 	cx
-	pop 	bx
-	pop 	ax
-endm
-
-GetCurs	proc near
-	push 	ax
-	push 	bx
-	push 	cx
-	mov 	ah, 03h
-	mov 	bh, 0
-	mov 	bl, 7
-	int 	10h
-	pop 	cx
-	pop 	bx
-	pop 	ax
-	ret
-GetCurs	endp
+; ПРОЦЕДУРЫ
+;---------------------------------------
+; наш обработчик прерывания 
+ROUT PROC FAR
+	; сохраняем используемые регистры:
+	push ax
+	push bp
+	push es
+	push ds
+	push dx
+	push di
 	
-SetCurs	proc near
-	push 	ax
-	push 	bx
-	push	cx
-	mov 	ah,	02h
-	mov 	bh,	0
-	mov 	bl, 07
-	int 	10h
-	pop		cx
-	pop 	bx 
-	pop 	ax
-	ret
-SetCurs	endp
-
-wrd_to_dec proc near
-    push 	cx
-    push 	dx
-    mov  	cx, 10
-wloop_bd:   
-    div 	cx
-    or  	dl, 30h
-    mov 	[si], dl
-    dec 	si
-	xor 	dx, dx
-    cmp 	ax, 10
-    jae 	wloop_bd
-    cmp 	al, 00h
-    je 		wend_l
-    or 		al, 30h
-    mov 	[si], al
-wend_l:      
-    pop 	dx
-    pop 	cx
-    ret
-   wrd_to_dec endp
-
-my_int proc far
-	jmp 	body
-	Int_Tag dw 1234h
-body:
-	push_reg
-	push 	si
-	push 	ds
+	mov ax,cs
+	mov ds,ax 
+	mov es,ax 
+	mov ax,CS:COUNT
+	add ax,1
+	mov CS:COUNT,ax
+	mov di,offset vivod+34
+	call WRD_TO_HEX
+	mov bp,offset vivod
+	call outputBP
 	
-	mov 	ax,	seg code
-	mov 	ds,	ax
-	inc 	cs:Counter
-	mov 	si, offset cs:Message
-	add 	si, 26
-	push	ax
-	push	dx
-	xor		dx,dx
-	mov		ax,Counter
-	call	wrd_to_dec
-	pop		dx
-	pop		ax
-	call 	GetCurs
-	push 	dx
-	dec 	dh
-	mov 	dl, 0
-	call 	SetCurs
-		
-	push_reg
-	push 	bp
-	push 	es
-	mov 	ax, seg code
-	mov 	es, ax
-	mov 	bp, offset es:Message
-	
-	mov 	cx,	33
-	mov		ah, 13h
-	mov		al, 01h
-	mov		bh, 0
-	mov		bl, 07h
-	
-	call 	GetCurs
-	int 	10h
-
-	pop 	es
-	pop 	bp
-	pop_reg
-	pop 	dx
-	
-	call 	SetCurs
-	pop 	ds
-	pop 	si
-	pop_reg
-	mov 	al, 20h
-	out 	20h, al
+	; восстанавливаем регистры:
+	pop di
+	pop dx
+	pop ds
+	pop es
+	pop bp
+	mov al,20h
+	out 20h,al
+	pop ax
 	iret
-my_int endp
-
-end_mem:
-
-old_int_save proc near
-	push_reg
-	push 	es
-	push 	di
-	mov		ah, 35h
-	mov		al,	1Ch
-	int 	21h
-	mov 	cs:KEEP_IP, bx
-	mov 	cs:KEEP_CS, es
-	pop 	di
-	pop 	es
-	pop_reg
+	SIGNATURA dw 0ABCDh
+	KEEP_PSP dw 0 ; для хранения psp нашего обработчика
+	KEEP_IP dw 0 ; переменная для хранения смещения стандартного обработчика прерывания
+	KEEP_CS dw 0 ; для хранения его сегмента 
+	COUNT	dw 0 ; для хранения количества вызовов обработчика
+	VIVOD db 'Количество вызовов прерывания:     $'
+ROUT ENDP 
+; --------------------------------------
+TETR_TO_HEX PROC near
+	and AL,0Fh
+	cmp AL,09
+	jbe NEXT
+	add AL,07
+NEXT: add AL,30h
 	ret
-old_int_save endp
-
-set_new_int proc near
-	push_reg
-	push 	ds
-	mov 	dx, offset my_int
-	mov 	ax, seg my_int
-	mov 	ds, ax
-	mov		ah, 25h
-	mov		al, 1Ch
-	int 	21h
-	pop 	ds
-	pop_reg
+TETR_TO_HEX ENDP
+;---------------------------------------
+BYTE_TO_HEX PROC near
+	push CX
+	mov AH,AL
+	call TETR_TO_HEX
+	xchg AL,AH
+	mov CL,4
+	shr AL,CL
+	call TETR_TO_HEX
+	pop CX
 	ret
-set_new_int endp
-
-load_my_int proc near	
-	mov 	dx, seg code	
-	;add 	dx, (end_mem-start_mem)
-	add		dx, (start_mem-end_mem)
-	mov 	cl, 4
-	shr 	dx, cl ;div 16
-	inc 	dx
-	mov 	ah, 31h
-	int 	21h
+BYTE_TO_HEX ENDP
+;---------------------------------------
+; перевод в 16с/с 16-ти разрядного числа
+; в AX - число, DI - адрес последнего символа
+WRD_TO_HEX PROC near
+	push BX
+	mov BH,AH
+	call BYTE_TO_HEX
+	mov [DI],AH
+	dec DI
+	mov [DI],AL
+	dec DI
+	mov AL,BH
+	call BYTE_TO_HEX
+	mov [DI],AH
+	dec DI
+	mov [DI],AL
+	pop BX
 	ret
-load_my_int endp
-
-delete_my_int proc near
-	cli
-	push_reg
-	push 	ds
-	push 	es
-	push 	di
-	mov		ah,35h
-	mov		al,1Ch
-	int 	21h
-	mov 	ax, es:[2]
-	mov 	cs:KEEP_CS, ax
-	mov 	ax, es:[4]
-	mov 	cs:KEEP_IP, ax
-	mov 	ax, es:[0]
-	mov 	cx, ax
-	mov 	es, ax
-	mov 	ax, es:[2Ch]
-	mov 	es, ax
-	xor 	ax, ax
-	mov 	ah, 49h
-	int 	21h
-	mov 	es, cx
-	xor 	ax, ax
-	mov 	ah, 49h
-	int 	21h
-	mov 	dx, cs:KEEP_IP
-	mov 	ax, cs:KEEP_CS
-	mov 	ds, ax
-	mov 	ax, 251Ch	
-	int 	21h
-	pop 	di
-	pop 	es
-	pop 	ds
-	pop_reg
-	sti
+WRD_TO_HEX ENDP
+;---------------------------------------
+; Функция вывода строки из BP
+outputBP PROC near
+	push ax
+	push bx
+	push dx
+	push cx
+	mov ah,13h
+	mov al,0
+	mov bl,09h
+	mov bh,0
+	mov dh,4
+	mov dl,22
+	mov cx,35
+	int 10h  
+	pop cx
+	pop dx
+	pop bx
+	pop ax
 	ret
-delete_my_int endp
-
-;вывод строки
-print proc near
-    push 	ax
-    push 	dx
-    mov 	ah, 09h
-    int 	21h
-    pop 	dx
-    pop 	ax
-    ret
-   print endp
-
-main proc near
-
-	push 	ds
-	mov 	ax, seg data
-	mov 	ds, ax
-	pop 	cs:PSP
+outputBP ENDP
+LAST_BYTE:
+;---------------------------------------
+PRINT PROC
+	push ax
+	mov ah,09h
+	int 21h
+	pop ax
+	ret
+PRINT ENDP
+;---------------------------------------
+; проверка, установлен ли наш обработчик прерывания:
+PROV_ROUT PROC
+	mov ah,35h
+	mov al,1ch
+	int 21h ; получили в ES:BX адрес обработчика прерывания
+	mov si,offset SIGNATURA
+	sub si,offset ROUT ; в SI - смещение сигнатуры относительно начала обработчика
+	mov ax,0ABCDh
+	cmp ax,ES:[BX+SI] ; сравниваем сигнатуры
+	je ROUT_EST
+		call SET_ROUT
+		jmp PROV_KONEC
+	ROUT_EST:
+		call DEL_ROUT
+	PROV_KONEC:
+	ret
+PROV_ROUT ENDP
+;---------------------------------------
+; установка нашего обработчика:
+SET_ROUT PROC
+	mov ax,KEEP_PSP 
+	mov es,ax ; кладём в es PSP нашей програмы
+	cmp byte ptr es:[80h],0
+		je UST
+	cmp byte ptr es:[82h],'/'
+		jne UST
+	cmp byte ptr es:[83h],'u'
+		jne UST
+	cmp byte ptr es:[84h],'n'
+		jne UST
 	
-	mov 	es, cs:PSP
-	mov 	al, es:[80h]
-	cmp 	al, 4
-	jne 	Empty_Tail
-
-	mov 	al, byte PTR es:[82h]	
-	cmp 	al, '/'
-	jne		Empty_Tail
-	mov 	al, byte PTR es:[83h]
-	cmp 	al, 'u'
-	jne		Empty_Tail
-	mov 	al, byte PTR es:[84h]
-	cmp 	al, 'n'
-	jne		Empty_Tail
+	mov dx,offset PRER_NE_SET_VIVOD
+	call PRINT
+	ret
+	
+	UST:
+	; сохраняем стандартный обработчик:
+	call SAVE_STAND	
+	
+	mov dx,offset PRER_SET_VIVOD
+	call PRINT
+	
+	push ds
+	; кладём в ds:dx адрес нашего обработчика:
+	mov dx,offset ROUT
+	mov ax,seg ROUT
+	mov ds,ax
+	
+	; меняем адрес обработчика прерывания 1Ch:
+	mov ah,25h
+	mov al,1ch
+	int 21h
+	pop ds
+	
+	; оставляем программу резидентно:
+	mov dx,offset LAST_BYTE
+	mov cl,4
+	shr dx,cl ; делим dx на 16
+	add dx,1
+	add dx,20h
 		
-	mov 	IsDelete, 1
+	xor AL,AL
+	mov ah,31h
+	int 21h ; оставляем наш обработчик в памяти
+		
+	xor AL,AL
+	mov AH,4Ch
+	int 21H
+SET_ROUT ENDP
+;---------------------------------------
+; удаление нашего обработчика:
+DEL_ROUT PROC
+	push dx
+	push ax
+	push ds
+	push es
+	
+	
+	mov ax,KEEP_PSP 
+	mov es,ax ; кладём в es PSP нашей програмы
+	cmp byte ptr es:[80h],0
+		je UDAL_KONEC
+	cmp byte ptr es:[82h],'/'
+		jne UDAL_KONEC
+	cmp byte ptr es:[83h],'u'
+		jne UDAL_KONEC
+	cmp byte ptr es:[84h],'n'
+		jne UDAL_KONEC
+	
+	mov dx,offset PRER_DEL_VIVOD
+	call PRINT
+	
+	mov ah,35h
+	mov al,1ch
+	int 21h ; получили в ES:BX адрес нашего обработчика
+	mov si,offset KEEP_IP
+	sub si,offset ROUT
+	
+	; возвращаем стандартный обработчик:
+	mov dx,es:[bx+si]
+	mov ax,es:[bx+si+2]
+	mov ds,ax
+	mov ah,25h
+	mov al,1ch
+	int 21h
+	
+	; удаляем из памяти наш обработчик:
+	mov ax,es:[bx+si-2] ; получили psp нашего обработчика
+	mov es,ax
+	mov ax,es:[2ch] ; получили сегментный адрес среды
+	push es
+	mov es,ax
+	mov ah,49h
+	int 21h
+	pop es
+	mov ah,49h
+	int 21h
 
-Empty_Tail:
-	mov		ah, 35h
-	mov		al,	1Ch
-	int 	21h
-	mov 	ax, es:[bx+3]
-	cmp 	ax, 1234h
-	je 		already_inst
+	jmp UDAL_KONEC2
 	
-	cmp 	IsDelete, 1
-	je 		not_inst
+	UDAL_KONEC:
+	mov dx,offset PRER_UZHE_SET_VIVOD
+	call PRINT
+	UDAL_KONEC2:
 	
-	call 	old_int_save
-	call 	set_new_int
-	call 	load_my_int
-	
-	jmp 	exit
-	
-already_inst:
-	cmp 	IsDelete, 1
-	je 		delete_my_int_main_m
-	mov		dx, offset Inst_Mess
-	call	print	
-	jmp 	exit
-	
-delete_my_int_main_m:
-	call 	delete_my_int
-	jmp 	exit
-	
-not_inst:
-	mov		dx, offset Not_Inst_Mess
-	call	print	
-	jmp		exit
-	
-exit:
-	xor 	al, al
-	mov 	ah, 4Ch
-	int 	21h
+	pop es
+	pop ds
+	pop ax
+	pop dx
 	ret
-main endp
+DEL_ROUT ENDP
+;---------------------------------------
+; сохранение адреса стандартного обработчика в KEEP_IP и KEEP_CS:
+SAVE_STAND PROC
+	push ax
+	push bx
+	push es
+	mov ah,35h
+	mov al,1ch
+	int 21h ; получили в ES:BX адрес обработчика прерывания
+	mov KEEP_CS, ES
+	mov KEEP_IP, BX
+	pop es
+	pop bx
+	pop ax
+	ret
+SAVE_STAND ENDP
+;---------------------------------------
+BEGIN:
+	mov ax,DATA
+	mov ds,ax
+	mov KEEP_PSP, es
+	call PROV_ROUT
+	xor AL,AL
+	mov AH,4Ch
+	int 21H
+CODE ENDS
 
-code ends
-
-data segment
-	IsDelete 		db 0
-	Inst_Mess		db 'Interrupt is already installed!', 10, 13, '$'
-	Not_Inst_Mess 	db 'Interrupt is not installed!', 10, 13, '$'
-data ends
-
-Tstack segment stack
-	dw 128 dup (?)
-Tstack ends
-
-
-end main
-
-
+; ДАННЫЕ
+DATA SEGMENT
+	PRER_SET_VIVOD db 'Установка обработчика прерывания','$'
+	PRER_DEL_VIVOD db 'Удаление обработчика прерывания',0DH,0AH,'$'
+	PRER_UZHE_SET_VIVOD db 'Обработчик прерывания уже установлен',0DH,0AH,'$'
+	PRER_NE_SET_VIVOD db 'Обработчик прерывания не установлен',0DH,0AH,'$'
+	STRENDL db 0DH,0AH,'$'
+DATA ENDS
+; СТЕК
+ASTACK SEGMENT STACK
+	dw 100h dup (?)
+ASTACK ENDS
+ END BEGIN
